@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Claude Switcher Bridge",
+  "version": "1.0.0",
+  "description": "Bridges the Claude Switcher desktop app to this browser so account switches flip claude.ai cookies and reload open tabs.",
+  "permissions": ["cookies", "tabs", "nativeMessaging", "storage"],
+  "host_permissions": [
+    "https://claude.ai/*",
+    "https://*.claude.ai/*",
+    "https://*.anthropic.com/*"
+  ],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "action": {
+    "default_title": "Claude Switcher",
+    "default_popup": "popup.html"
+  }
+}

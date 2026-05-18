@@ -1,55 +1,139 @@
-# Claude Account Switcher
+# Claude Switcher
 
-A small desktop app to switch between multiple Claude accounts across VS Code, Cursor, and other Claude Code integrations.
+Windows 11 desktop app that swaps your Claude logins across every surface you
+have open in one click:
 
-## How it works
+| Surface | What gets swapped |
+|---|---|
+| Claude Code CLI (and the VS Code / Antigravity extensions that share its credentials) | `~/.claude/.credentials.json` |
+| Claude Desktop (MSIX app from the Microsoft Store) | `%APPDATA%\Claude\` auth files; app is closed + relaunched via AUMID |
+| Antigravity | `%APPDATA%\Antigravity\` auth files; app closed + relaunched |
+| `claude.ai` tabs in Chrome | Cookies flipped via a companion MV3 extension; matching tabs reloaded in place |
 
-Claude Code stores its OAuth credentials in `~/.claude/.credentials.json`.  
-This app manages named snapshots of that file, letting you swap accounts in one click.
+Profiles live under `~/.claude_switcher/profiles/<id>/` with all credential
+snapshots **DPAPI-wrapped (per-user)** so another user account on the same
+machine cannot read them.
 
-## Setup
+## Architecture
 
-```bash
-# Python 3.10+ with tkinter (built-in on Windows/macOS; on Ubuntu: sudo apt install python3-tk)
-python main.py
+```
+[Chrome tab]              [Chrome extension (MV3)]
+     |                              |
+     |                              | chrome.runtime.connectNative
+     |                              v
+     |               [claude-switcher-host.exe]   <-- stdio frames in/out
+     |                              |
+     |                              | named pipe \\.\pipe\ClaudeSwitcher
+     |                              v
+[Claude Desktop]   [Antigravity]  [ClaudeSwitcher.App]  --> swaps files,
+[Claude Code CLI]                                            kills/relaunches apps,
+                                                             pushes cookie commands
+                                                             back to extension
 ```
 
-Optional modern styling:
-```bash
-pip install customtkinter
-python main.py
+* **ClaudeSwitcher.Core** — profile store + DPAPI vault + the four
+  `ISwapProvider` implementations (CLI, Claude Desktop, Antigravity, Chrome).
+* **ClaudeSwitcher.App** — WPF tray app. Hosts the named-pipe server, the
+  Chrome bridge, the system tray icon, and the management window.
+* **ClaudeSwitcher.NativeHost** — tiny console exe Chrome spawns on each
+  native-messaging connection; forwards the byte stream to the tray app's pipe.
+* **chrome-extension/** — Manifest V3 extension. Captures and applies
+  claude.ai cookies via `chrome.cookies` and reloads matching tabs.
+
+## Build
+
+Requires .NET 9 SDK and Windows 10/11.
+
+```powershell
+dotnet build .\ClaudeSwitcher.sln
 ```
 
-## Usage
+Run the tray app:
 
-### First run — save your accounts
+```powershell
+dotnet run --project .\src\ClaudeSwitcher.App
+```
 
-1. **Log in** to Account A inside VS Code (Claude Code extension).
-2. Open this app → click **+ Add Account** → choose *"Capture current credentials"* → name it (e.g. `Work`).
-3. Log out in VS Code, log in as Account B.
-4. Click **+ Add Account** again → name it (e.g. `Personal`).
+On first launch the app migrates any legacy `~/.claude_switcher/profiles.json`
+(from the previous Python switcher) into the new on-disk layout.
 
-### Switching
+## Wire up Chrome
 
-- Click **Switch Here** on any account card.
-- The previously-active account's credentials are saved automatically.
-- **Reload your VS Code / Cursor windows** after switching (Command Palette → `Developer: Reload Window`).
+1. Build the solution so `claude-switcher-host.exe` exists under
+   `src\ClaudeSwitcher.NativeHost\bin\Debug\net9.0-windows\`.
+2. In Chrome, open `chrome://extensions/`, flip on **Developer mode**, click
+   **Load unpacked**, and select the `chrome-extension/` folder. Copy the
+   32-character extension ID Chrome assigns it.
+3. Register the native-messaging host:
 
-### API-key accounts
+   ```powershell
+   .\setup\Register-NativeHost.ps1 -ExtensionId <your-extension-id>
+   ```
 
-If you have an `ANTHROPIC_API_KEY` instead of an OAuth login, choose *"Paste ANTHROPIC_API_KEY"* when adding an account.
+   This writes
+   `%LOCALAPPDATA%\ClaudeSwitcher\com.operative.claudeswitcher.json` and the
+   `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.operative.claudeswitcher`
+   registry key.
+4. Reload the extension. Its popup should now say **Connected to desktop app**,
+   and the main window's "Browser bridge" line should turn green.
 
-### Browser tabs
+`setup\Unregister-NativeHost.ps1` reverses step 3.
 
-Browser sessions on `claude.ai` are independent of Claude Code credentials.  
-To switch there you still need to sign out and sign in manually.
+## Using it
 
-## Data storage
+1. Log in to one account everywhere (Chrome tabs, Claude Desktop, Antigravity,
+   `claude` CLI). In the tray app, click **+ Add Profile**, name it (e.g.
+   "Personal"). The app snapshots all four targets into that profile.
+2. Log out of everything and log into the other account. **+ Add Profile**
+   again as "Work".
+3. From now on, switch from the tray icon's menu (or from the main window).
+   The app first captures the currently-live state back into the active
+   profile (so any new logins are preserved), then applies the chosen
+   profile to every target.
 
-Account profiles are stored in `~/.claude_switcher/profiles.json`.  
-Credentials are stored in plain JSON (same format Claude Code already uses).
+### What "switch" actually does, per target
 
-## Limitations
+* **CLI** — overwrites `~/.claude/.credentials.json` from the DPAPI-wrapped
+  snapshot. No restart needed; the CLI re-reads creds on each invocation, and
+  the VS Code / Antigravity Claude Code extensions read the same file.
+* **Claude Desktop** — closes the running app, swaps `%APPDATA%\Claude\`
+  auth files (`Local State`, `Network\Cookies*`, `Local Storage\`,
+  `Session Storage\`, plus a few peers), and relaunches via
+  `shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude`.
+* **Antigravity** — same pattern against `%APPDATA%\Antigravity\` and
+  `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe`.
+* **Chrome** — extension wipes existing `claude.ai` / `anthropic.com` cookies,
+  applies the saved set, and reloads all matching tabs (`bypassCache: true`).
 
-- Switching affects all Claude Code instances that share `~/.claude/` (VS Code, Cursor, etc.) — they all read the same file.
-- Active browser sessions are unaffected.
+### Caveats
+
+* Switching closes Claude Desktop and Antigravity. **Unsaved chat input is
+  lost.** Toggle "Auto-relaunch" off in the main window if you'd rather
+  reopen them manually.
+* The Chrome leg only works while the extension is loaded and the desktop
+  app is running. With the bridge disconnected, switches still happen for
+  the other three targets — you'll see "skipped (browser extension not
+  connected)" in the result toast.
+* `Local State` holds the DPAPI-wrapped cookie encryption key. We always
+  snapshot and apply it as a unit with `Network\Cookies` so cookies remain
+  readable after the swap.
+
+## Layout
+
+```
+.
+├── ClaudeSwitcher.sln
+├── README.md
+├── chrome-extension/
+│   ├── manifest.json
+│   ├── service_worker.js
+│   ├── popup.html
+│   └── popup.js
+├── setup/
+│   ├── Register-NativeHost.ps1
+│   └── Unregister-NativeHost.ps1
+└── src/
+    ├── ClaudeSwitcher.Core/         # profile model, DPAPI vault, providers
+    ├── ClaudeSwitcher.App/          # WPF tray app, IPC server, UI
+    └── ClaudeSwitcher.NativeHost/   # Chrome native-messaging stdio bridge
+```

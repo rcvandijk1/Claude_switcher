@@ -1,4 +1,0 @@
-# No third-party dependencies required.
-# The app uses only Python's built-in tkinter.
-# Optional: install customtkinter for a more modern look (imported but not required).
-# customtkinter>=5.2.0

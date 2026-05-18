@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Claude Switcher Bridge</title>
+    <style>
+      body { width: 260px; padding: 14px 16px; font-family: 'Segoe UI', system-ui, sans-serif; background:#1E1E2E; color:#E0E0F0; margin:0; }
+      h1 { font-size: 13px; margin: 0 0 8px; color: #D97706; letter-spacing: 0.5px; }
+      .row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 6px; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; }
+      .ok { background:#22C55E; }
+      .bad { background:#EF4444; }
+      p { font-size: 11px; color:#888899; margin-top: 10px; line-height: 1.4; }
+      code { background:#2A2A3E; padding: 1px 4px; border-radius: 3px; }
+    </style>
+  </head>
+  <body>
+    <h1>CLAUDE SWITCHER BRIDGE</h1>
+    <div class="row"><div id="dot" class="dot bad"></div><span id="status">Disconnected</span></div>
+    <p>Switching is driven from the desktop app. This extension flips claude.ai cookies and reloads open tabs when the app asks it to.</p>
+    <script src="popup.js"></script>
+  </body>
+</html>
